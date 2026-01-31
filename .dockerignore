@@ -1,0 +1,74 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Testing
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.hypothesis/
+
+# Documentation
+docs/_build/
+
+# Local development
+*.log
+*.local
+.env.local
+.env.*.local
+
+# Infrastructure (not needed in container)
+infrastructure/
+terraform/
+
+# Tests (not needed in production image)
+tests/
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.docker/
+
+# Misc
+*.md
+*.rst
+Makefile
+.pre-commit-config.yaml
