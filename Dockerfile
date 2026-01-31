@@ -44,8 +44,9 @@ RUN pip install --no-cache-dir --no-index --find-links=/wheels battery-smart-voi
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 
-# Set ownership
-RUN chown -R voicebot:voicebot /app
+# Make scripts executable and set ownership
+RUN chmod +x ./scripts/*.sh && \
+    chown -R voicebot:voicebot /app
 
 # Switch to non-root user
 USER voicebot

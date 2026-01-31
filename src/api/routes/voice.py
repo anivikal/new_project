@@ -122,10 +122,16 @@ class ConnectionManager:
 manager = ConnectionManager()
 settings = get_settings()
 
+# Singleton dialogue manager
+_dialogue_manager: DialogueManager | None = None
+
 
 def get_dialogue_manager() -> DialogueManager:
-    """Get or create dialogue manager."""
-    return DialogueManager()
+    """Get or create dialogue manager singleton."""
+    global _dialogue_manager
+    if _dialogue_manager is None:
+        _dialogue_manager = DialogueManager()
+    return _dialogue_manager
 
 
 @router.post("/start", response_model=StartCallResponse)
