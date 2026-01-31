@@ -225,42 +225,91 @@ Generate a JSON summary:
     
     async def generate_response(
         self,
-        session: ConversationSession,
+        user_query: str,
         intent: Intent,
-        entities: dict[str, Any],
+        entities: list = None,
+        language: Language = Language.HINGLISH,
+        context: dict | None = None,
+        session: ConversationSession | None = None,
         tool_result: dict | None = None
-    ) -> LLMResponse:
+    ) -> str:
         """
         Generate a contextual response using Groq LLM.
         
         Args:
-            session: Current conversation session
+            user_query: The user's current query text
             intent: Detected user intent
-            entities: Extracted entities
+            entities: Extracted entities list
+            language: Target language for response
+            context: Additional context dict (conversation history, tool results, etc.)
+            session: Optional conversation session for full context
             tool_result: Result from tool call if any
         
         Returns:
-            Generated response
+            Generated response text
         """
+        entities = entities or []
+        context = context or {}
+        
         # Build conversation history
-        history = self._build_history(session.turns[-6:])
+        if session:
+            history = self._build_history(session.turns[-6:])
+        elif context.get("conversation_history"):
+            history_parts = []
+            for turn in context["conversation_history"]:
+                role = "Driver" if turn.get("role") == "user" else "Bot"
+                history_parts.append(f"{role}: {turn.get('content', '')}")
+            history = "\n".join(history_parts) if history_parts else "No previous conversation."
+        else:
+            history = "No previous conversation."
         
-        # Determine target language
-        language = "Hinglish" if session.driver.preferred_language == Language.HINGLISH else \
-                   "Hindi" if session.driver.preferred_language == Language.HINDI else "English"
+        # Determine target language string
+        if language == Language.HINDI:
+            lang_str = "Hindi"
+        elif language == Language.ENGLISH_INDIA:
+            lang_str = "English"
+        else:
+            lang_str = "Hinglish (natural mix of Hindi and English)"
         
-        # Build prompt
-        prompt = self.RESPONSE_PROMPT.format(
-            history=history,
-            query=session.turns[-1].content if session.turns else "",
-            intent=intent.value,
-            entities=json.dumps(entities, default=str),
-            language=language
-        )
+        # Get tool result from context if available
+        if not tool_result and context.get("tool_result"):
+            tool_result = context["tool_result"]
         
-        # Add tool result context
+        # Build the prompt based on intent
         if tool_result:
-            prompt += f"\n\nTool result to incorporate: {json.dumps(tool_result, default=str)}"
+            # Response with data
+            prompt = f"""Generate a helpful response for this Battery Smart driver query.
+
+User's query: {user_query}
+Intent: {intent.value}
+Data to include in response: {json.dumps(tool_result, default=str, ensure_ascii=False)}
+
+Previous conversation:
+{history}
+
+Generate a natural, helpful response in {lang_str}.
+- Be concise (2-3 sentences max)
+- Include the relevant data naturally
+- Be friendly and use "aap" (formal you)
+
+Response:"""
+        else:
+            # General response
+            prompt = f"""Generate a helpful response for this Battery Smart driver query.
+
+User's query: {user_query}
+Intent: {intent.value}
+
+Previous conversation:
+{history}
+
+Generate a natural, helpful response in {lang_str}.
+- Be concise (2-3 sentences max)
+- If the intent is 'unknown' or 'out_of_scope', acknowledge kindly and offer to help with what you can do
+- Be friendly and use "aap" (formal you)
+- If frustrated/confused user, be empathetic first
+
+Response:"""
         
         try:
             result = await self._call_groq(
@@ -283,21 +332,11 @@ Generate a JSON summary:
                 tokens=tokens
             )
             
-            return LLMResponse(
-                text=text.strip(),
-                confidence=0.9,
-                tokens_used=tokens,
-                model=self.model
-            )
+            return text.strip()
             
         except Exception as e:
             logger.error("groq_generation_failed", error=str(e))
-            return LLMResponse(
-                text=self._get_fallback_response(intent, language),
-                confidence=0.5,
-                tokens_used=0,
-                model="fallback"
-            )
+            return self._get_fallback_response(intent, lang_str)
     
     async def classify_intent(
         self,

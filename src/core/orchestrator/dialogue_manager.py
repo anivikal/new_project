@@ -27,6 +27,13 @@ from src.models import (
     TurnRole,
 )
 
+# Import Groq service for LLM-powered response generation
+try:
+    from src.services.groq.llm_service import get_groq_service
+    GROQ_AVAILABLE = True
+except ImportError:
+    GROQ_AVAILABLE = False
+
 logger = structlog.get_logger(__name__)
 
 
@@ -271,7 +278,7 @@ class DialogueManager:
     1. Process user input through NLU
     2. Manage conversation state and context
     3. Handle slot filling for intents
-    4. Generate appropriate responses
+    4. Generate appropriate responses using LLM
     5. Integrate with decision layer for handoff
     """
     
@@ -284,6 +291,15 @@ class DialogueManager:
         self.nlu_pipeline = nlu_pipeline or get_nlu_pipeline()
         self.decision_engine = decision_engine or HandoffDecisionEngine()
         self.response_generator = ResponseGenerator()
+        
+        # Initialize Groq LLM service for dynamic response generation
+        self._groq_service = None
+        if GROQ_AVAILABLE:
+            try:
+                self._groq_service = get_groq_service()
+                logger.info("groq_service_initialized_for_dialogue")
+            except Exception as e:
+                logger.warning("groq_service_init_failed", error=str(e))
         
         # Session storage (in production, use Redis)
         self._sessions: dict[str, ConversationSession] = {}
@@ -413,12 +429,68 @@ class DialogueManager:
         dialogue_state: DialogueState,
         nlu_result: NLUResult
     ) -> tuple[str, list[dict]]:
-        """Handle intent and generate response."""
+        """Handle intent and generate response using LLM."""
         intent = nlu_result.intent.intent
         language = session.driver.preferred_language
         tool_calls = []
         
-        # Handle special intents
+        # Get user's original query for context
+        user_query = session.turns[-1].content if session.turns else ""
+        
+        # Build conversation context for LLM
+        conversation_context = self._build_conversation_context(session)
+        
+        # Try to generate LLM response for all intents
+        if self._groq_service:
+            try:
+                # Handle special intents with LLM-generated responses
+                if intent == Intent.GREETING:
+                    llm_response = await self._generate_llm_response(
+                        user_query=user_query,
+                        intent=intent,
+                        context=conversation_context,
+                        language=language
+                    )
+                    return llm_response, []
+                
+                if intent == Intent.GOODBYE:
+                    session.state = ConversationState.COMPLETED
+                    llm_response = await self._generate_llm_response(
+                        user_query=user_query,
+                        intent=intent,
+                        context=conversation_context,
+                        language=language
+                    )
+                    return llm_response, []
+                
+                if intent == Intent.HELP:
+                    llm_response = await self._generate_llm_response(
+                        user_query=user_query,
+                        intent=intent,
+                        context=conversation_context,
+                        language=language
+                    )
+                    return llm_response, []
+                
+                if intent == Intent.UNKNOWN or intent == Intent.OUT_OF_SCOPE:
+                    dialogue_state.clarification_count += 1
+                    session.metrics.clarification_count = dialogue_state.clarification_count
+                    
+                    # Generate contextual response using LLM
+                    llm_response = await self._generate_llm_response(
+                        user_query=user_query,
+                        intent=intent,
+                        context=conversation_context,
+                        language=language,
+                        sentiment=nlu_result.sentiment.label.value if nlu_result.sentiment else "neutral"
+                    )
+                    return llm_response, []
+                    
+            except Exception as e:
+                logger.warning("llm_response_generation_failed", error=str(e))
+                # Fall back to template responses
+        
+        # Fallback: Handle special intents with templates
         if intent == Intent.GREETING:
             return self.response_generator.generate_greeting(language), []
         
@@ -429,15 +501,13 @@ class DialogueManager:
         if intent == Intent.HELP:
             return self.response_generator.generate_help(language), []
         
-        if intent == Intent.UNKNOWN:
+        if intent == Intent.UNKNOWN or intent == Intent.OUT_OF_SCOPE:
             dialogue_state.clarification_count += 1
             session.metrics.clarification_count = dialogue_state.clarification_count
             
-            # Check if user is frustrated/upset - respond with empathy
             if nlu_result.sentiment and nlu_result.sentiment.label.value in ['negative', 'frustrated']:
                 return self.response_generator.generate_empathy(language), []
             
-            # If this is the first unclear message, be helpful
             if dialogue_state.clarification_count == 1:
                 return self.response_generator.generate_help(language), []
             
@@ -496,11 +566,12 @@ class DialogueManager:
                 "result": tool_result
             })
             
-            # Generate response based on tool result
+            # Generate response based on tool result using LLM
             response = await self._generate_tool_response(
                 intent_config,
                 tool_result,
-                language
+                language,
+                user_query=user_query
             )
             
             # Mark intent as resolved
@@ -580,15 +651,29 @@ class DialogueManager:
         self,
         intent_config: IntentConfig,
         tool_result: dict,
-        language: Language
+        language: Language,
+        user_query: str = ""
     ) -> str:
-        """Generate response from tool result."""
+        """Generate response from tool result using LLM."""
         if not tool_result.get("success"):
             return self._generate_error_response(language)
         
-        # In production, use Bedrock to generate natural response
-        # For MVP, use templates
+        # Try to use LLM for natural response generation
+        if self._groq_service:
+            try:
+                # Build prompt with tool result data
+                data_context = f"Data: {tool_result}"
+                llm_response = await self._generate_llm_response(
+                    user_query=user_query,
+                    intent=intent_config.intent,
+                    context={"tool_result": tool_result},
+                    language=language
+                )
+                return llm_response
+            except Exception as e:
+                logger.warning("llm_tool_response_failed", error=str(e))
         
+        # Fallback to templates
         templates = {
             Intent.SWAP_HISTORY: {
                 Language.HINGLISH: "Aapke total {count} swaps hue hain. {details}",
@@ -618,6 +703,46 @@ class DialogueManager:
         
         # Fallback
         return f"Done! {tool_result}"
+    
+    def _build_conversation_context(self, session: ConversationSession) -> dict:
+        """Build conversation context for LLM."""
+        # Get last 5 turns for context
+        recent_turns = []
+        for turn in session.turns[-10:]:
+            recent_turns.append({
+                "role": "user" if turn.role == TurnRole.USER else "assistant",
+                "content": turn.content
+            })
+        
+        return {
+            "conversation_history": recent_turns,
+            "driver_name": session.driver.name or "Driver",
+            "current_intent": session.current_intent.value if session.current_intent else None,
+            "filled_slots": session.filled_slots,
+        }
+    
+    async def _generate_llm_response(
+        self,
+        user_query: str,
+        intent: Intent,
+        context: dict,
+        language: Language,
+        sentiment: str = "neutral"
+    ) -> str:
+        """Generate natural response using Groq LLM."""
+        if not self._groq_service:
+            raise RuntimeError("Groq service not available")
+        
+        # Use the Groq service's generate_response method
+        response = await self._groq_service.generate_response(
+            user_query=user_query,
+            intent=intent,
+            entities=[],  # Entities already processed
+            language=language,
+            context=context
+        )
+        
+        return response
     
     def _generate_help_response(self, language: Language) -> str:
         """Generate help menu response."""
