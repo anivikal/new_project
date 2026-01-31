@@ -48,12 +48,17 @@ class GroqLLMService:
     SYSTEM_PROMPT = """You are a helpful AI assistant for Battery Smart, India's largest EV battery swapping network.
 You help drivers/riders with their queries in a friendly, conversational manner.
 
+CRITICAL LANGUAGE RULE:
+- If user writes in Hindi (Devanagari script like नमस्ते, कैसे हो), respond in Hindi using Devanagari script
+- If user writes in English, respond in English
+- If user writes in Hinglish (Roman script Hindi like "kaise ho", "subscription batao"), respond in Hinglish
+- ALWAYS match the user's language and script
+
 Key guidelines:
-1. Respond naturally in Hinglish (Hindi-English mix) or pure Hindi based on user's language
-2. Be concise - drivers are usually in a hurry
-3. Be empathetic when users are frustrated
-4. Always confirm understanding before taking action
-5. If you can't help, acknowledge it and offer to connect with human support
+1. Be concise - drivers are usually in a hurry (2-3 sentences max)
+2. Be empathetic when users are frustrated
+3. Always confirm understanding before taking action
+4. If you can't help, acknowledge it and offer to connect with human support
 
 Battery Smart services you can help with:
 - Swap history and invoices
@@ -263,13 +268,16 @@ Generate a JSON summary:
         else:
             history = "No previous conversation."
         
-        # Determine target language string
-        if language == Language.HINDI:
-            lang_str = "Hindi"
+        # Determine target language string and script
+        # Important: Detect if user wrote in Devanagari vs Roman script
+        user_used_devanagari = any('\u0900' <= c <= '\u097F' for c in user_query)
+        
+        if user_used_devanagari or language == Language.HINDI:
+            lang_str = "Hindi using Devanagari script (like नमस्ते, मैं आपकी मदद करता हूं)"
         elif language == Language.ENGLISH_INDIA:
             lang_str = "English"
         else:
-            lang_str = "Hinglish (natural mix of Hindi and English)"
+            lang_str = "Hinglish using Roman script (like 'Aapka subscription active hai')"
         
         # Get tool result from context if available
         if not tool_result and context.get("tool_result"):
@@ -287,7 +295,8 @@ Data to include in response: {json.dumps(tool_result, default=str, ensure_ascii=
 Previous conversation:
 {history}
 
-Generate a natural, helpful response in {lang_str}.
+IMPORTANT: Generate response in {lang_str}.
+- Match the user's language/script exactly
 - Be concise (2-3 sentences max)
 - Include the relevant data naturally
 - Be friendly and use "aap" (formal you)
@@ -303,9 +312,10 @@ Intent: {intent.value}
 Previous conversation:
 {history}
 
-Generate a natural, helpful response in {lang_str}.
+IMPORTANT: Generate response in {lang_str}.
+- Match the user's language/script exactly
 - Be concise (2-3 sentences max)
-- If the intent is 'unknown' or 'out_of_scope', acknowledge kindly and offer to help with what you can do
+- If the intent is 'unknown' or 'out_of_scope', acknowledge kindly and offer to help with Battery Smart services
 - Be friendly and use "aap" (formal you)
 - If frustrated/confused user, be empathetic first
 
