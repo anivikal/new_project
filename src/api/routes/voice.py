@@ -50,6 +50,7 @@ class TextInputRequest(BaseModel):
     
     call_id: str
     text: str
+    language: str | None = Field(default=None, description="User's language preference (hi, en, hi-en)")
 
 
 class ConversationResponse(BaseModel):
@@ -60,6 +61,7 @@ class ConversationResponse(BaseModel):
     intent: str | None = None
     confidence: float | None = None
     sentiment: str | None = None
+    detected_language: str | None = None
     handoff_triggered: bool = False
     handoff_info: dict | None = None
     session_state: str
@@ -208,13 +210,36 @@ async def process_text_message(request: TextInputRequest):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
+    # Update session language if provided
+    if request.language:
+        lang_map = {
+            "hi": Language.HINDI,
+            "en": Language.ENGLISH_INDIA,
+            "hi-en": Language.HINGLISH,
+            "hinglish": Language.HINGLISH,
+        }
+        if request.language in lang_map:
+            session.driver.preferred_language = lang_map[request.language]
+    
+    # Detect language from user input
+    detected_language = _detect_language(request.text)
+    
+    # If we detected a specific language, use it for the response
+    if detected_language and detected_language != "mixed":
+        lang_map = {
+            "hi": Language.HINDI,
+            "en": Language.ENGLISH_INDIA,
+            "mixed": Language.HINGLISH,
+        }
+        session.driver.preferred_language = lang_map.get(detected_language, Language.HINGLISH)
+    
     # Process the turn
     response_text, handoff_decision = await dialogue_manager.process_turn(
         call_id=request.call_id,
         user_text=request.text
     )
     
-    # Synthesize response audio (uses configured TTS provider)
+    # Synthesize response audio using detected/preferred language
     response_audio_base64 = None
     try:
         synthesizer = SynthesizerFactory.create()  # Uses auto/configured provider
@@ -259,10 +284,41 @@ async def process_text_message(request: TextInputRequest):
         intent=intent,
         confidence=confidence,
         sentiment=sentiment,
+        detected_language=detected_language or session.driver.preferred_language.value,
         handoff_triggered=handoff_decision.should_handoff if handoff_decision else False,
         handoff_info=handoff_info,
         session_state=session.state.value
     )
+
+
+def _detect_language(text: str) -> str | None:
+    """Detect language from text using simple heuristics."""
+    if not text:
+        return None
+    
+    # Count Hindi vs English characters
+    hindi_chars = 0
+    english_chars = 0
+    
+    for char in text:
+        # Hindi Unicode range: U+0900 to U+097F (Devanagari)
+        if '\u0900' <= char <= '\u097F':
+            hindi_chars += 1
+        elif char.isalpha() and char.isascii():
+            english_chars += 1
+    
+    total = hindi_chars + english_chars
+    if total == 0:
+        return None
+    
+    hindi_ratio = hindi_chars / total
+    
+    if hindi_ratio > 0.7:
+        return "hi"  # Mostly Hindi
+    elif hindi_ratio < 0.2:
+        return "en"  # Mostly English
+    else:
+        return "mixed"  # Hinglish
 
 
 @router.post("/end")

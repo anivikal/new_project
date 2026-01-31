@@ -27,6 +27,13 @@ from src.models import (
     TurnRole,
 )
 
+# Import Groq service for LLM-powered response generation
+try:
+    from src.services.groq.llm_service import get_groq_service
+    GROQ_AVAILABLE = True
+except ImportError:
+    GROQ_AVAILABLE = False
+
 logger = structlog.get_logger(__name__)
 
 
@@ -183,43 +190,44 @@ class DialogueState:
 
 
 class ResponseGenerator:
-    """Generates natural responses in Hindi/Hinglish."""
+    """Generates natural human-like responses."""
     
+    # Human-like greetings (as Rahul from support)
     GREETING_RESPONSES = {
-        Language.HINDI: "नमस्ते! मैं Battery Smart का AI assistant हूँ। आज मैं आपकी कैसे मदद कर सकता हूँ?",
-        Language.HINGLISH: "Namaste! Main Battery Smart ka AI assistant hoon. Aaj main aapki kaise help kar sakta hoon?",
-        Language.ENGLISH_INDIA: "Hello! I'm Battery Smart's AI assistant. How can I help you today?",
+        Language.HINDI: "हाँ जी, बोलिए! मैं राहुल बोल रहा हूँ Battery Smart से। कैसे मदद करूँ आपकी?",
+        Language.HINGLISH: "Haan ji boliye! Rahul here from Battery Smart. Kaise help kar sakta hoon aapki?",
+        Language.ENGLISH_INDIA: "Hey! Rahul here from Battery Smart. How can I help you today?",
     }
     
     CLARIFICATION_RESPONSES = {
-        Language.HINDI: "जी, मैं सुन रहा हूँ। आप बताइए - swap history, nearest station, ya subscription के बारे में पूछना है?",
-        Language.HINGLISH: "Ji, main sun raha hoon. Aap bataiye - swap history, nearest station, ya subscription ke baare mein poochna hai?",
-        Language.ENGLISH_INDIA: "Yes, I'm listening. Please tell me - do you want to ask about swap history, nearest station, or subscription?",
+        Language.HINDI: "अच्छा अच्छा, बताइए क्या चाहिए - swap history, station ढूंढना है, या subscription का कुछ?",
+        Language.HINGLISH: "Acha acha, bataiye kya chahiye - swap history, station dhundhna hai, ya subscription ka kuch?",
+        Language.ENGLISH_INDIA: "Sure sure, tell me what you need - swap history, finding a station, or something about subscription?",
     }
     
-    # Empathetic responses for when user seems frustrated
+    # Empathetic responses - sound genuinely concerned
     EMPATHY_RESPONSES = {
-        Language.HINDI: "मैं समझ सकता हूँ। मैं आपकी मदद करने के लिए यहाँ हूँ। बताइए क्या परेशानी है?",
-        Language.HINGLISH: "Main samajh sakta hoon. Main aapki madad karne ke liye yahan hoon. Bataiye kya pareshani hai?",
-        Language.ENGLISH_INDIA: "I understand. I'm here to help you. Please tell me what's the issue?",
+        Language.HINDI: "अरे यार, मैं समझ सकता हूँ। परेशान मत होइए, बताइए क्या हुआ - मैं देखता हूँ।",
+        Language.HINGLISH: "Arre yaar, main samajh sakta hoon. Tension mat lo, bataiye kya hua - main dekhta hoon.",
+        Language.ENGLISH_INDIA: "Hey, I totally understand. Don't worry, tell me what happened - let me look into it.",
     }
     
     HELP_RESPONSES = {
-        Language.HINDI: "मैं आपकी इन चीज़ों में मदद कर सकता हूँ: 1) Swap history 2) Nearest station 3) Subscription status 4) Invoice help। क्या चाहिए?",
-        Language.HINGLISH: "Main aapki in cheezon mein madad kar sakta hoon: 1) Swap history 2) Nearest station 3) Subscription status 4) Invoice help. Kya chahiye?",
-        Language.ENGLISH_INDIA: "I can help you with: 1) Swap history 2) Nearest station 3) Subscription status 4) Invoice help. What do you need?",
+        Language.HINDI: "देखो, मैं ये सब कर सकता हूँ - swap history, nearest station, subscription check, invoice explain. क्या चाहिए?",
+        Language.HINGLISH: "Dekho, main ye sab kar sakta hoon - swap history, nearest station, subscription check, invoice explain. Kya chahiye?",
+        Language.ENGLISH_INDIA: "Look, I can help with swap history, nearest station, subscription stuff, or invoice queries. What do you need?",
     }
     
     HANDOFF_RESPONSES = {
-        Language.HINDI: "मैं आपको हमारे customer care executive से connect कर रहा हूँ। कृपया थोड़ा इंतज़ार करें।",
-        Language.HINGLISH: "Main aapko humare customer care executive se connect kar raha hoon. Please thoda wait karein.",
-        Language.ENGLISH_INDIA: "I'm connecting you with our customer care executive. Please wait a moment.",
+        Language.HINDI: "अच्छा ठीक है, मैं आपको सीनियर से बात करवाता हूँ। एक मिनट रुकिए।",
+        Language.HINGLISH: "Acha theek hai, main aapko senior se baat karvata hoon. Ek minute rukiye.",
+        Language.ENGLISH_INDIA: "Okay, let me connect you with a senior executive. Just a moment.",
     }
     
     GOODBYE_RESPONSES = {
-        Language.HINDI: "धन्यवाद! Battery Smart को choose करने के लिए। अगर कोई और help चाहिए तो ज़रूर बताइए।",
-        Language.HINGLISH: "Thank you! Battery Smart choose karne ke liye. Agar koi aur help chahiye toh zaroor bataiye.",
-        Language.ENGLISH_INDIA: "Thank you for choosing Battery Smart! Let us know if you need any other help.",
+        Language.HINDI: "ठीक है भाई, कोई और help चाहिए तो बताना। Take care!",
+        Language.HINGLISH: "Theek hai bhai, koi aur help chahiye toh batana. Take care!",
+        Language.ENGLISH_INDIA: "Alright, let me know if you need anything else. Take care!",
     }
     
     def generate_greeting(self, language: Language) -> str:
@@ -271,7 +279,7 @@ class DialogueManager:
     1. Process user input through NLU
     2. Manage conversation state and context
     3. Handle slot filling for intents
-    4. Generate appropriate responses
+    4. Generate appropriate responses using LLM
     5. Integrate with decision layer for handoff
     """
     
@@ -284,6 +292,15 @@ class DialogueManager:
         self.nlu_pipeline = nlu_pipeline or get_nlu_pipeline()
         self.decision_engine = decision_engine or HandoffDecisionEngine()
         self.response_generator = ResponseGenerator()
+        
+        # Initialize Groq LLM service for dynamic response generation
+        self._groq_service = None
+        if GROQ_AVAILABLE:
+            try:
+                self._groq_service = get_groq_service()
+                logger.info("groq_service_initialized_for_dialogue")
+            except Exception as e:
+                logger.warning("groq_service_init_failed", error=str(e))
         
         # Session storage (in production, use Redis)
         self._sessions: dict[str, ConversationSession] = {}
@@ -413,12 +430,68 @@ class DialogueManager:
         dialogue_state: DialogueState,
         nlu_result: NLUResult
     ) -> tuple[str, list[dict]]:
-        """Handle intent and generate response."""
+        """Handle intent and generate response using LLM."""
         intent = nlu_result.intent.intent
         language = session.driver.preferred_language
         tool_calls = []
         
-        # Handle special intents
+        # Get user's original query for context
+        user_query = session.turns[-1].content if session.turns else ""
+        
+        # Build conversation context for LLM
+        conversation_context = self._build_conversation_context(session)
+        
+        # Try to generate LLM response for all intents
+        if self._groq_service:
+            try:
+                # Handle special intents with LLM-generated responses
+                if intent == Intent.GREETING:
+                    llm_response = await self._generate_llm_response(
+                        user_query=user_query,
+                        intent=intent,
+                        context=conversation_context,
+                        language=language
+                    )
+                    return llm_response, []
+                
+                if intent == Intent.GOODBYE:
+                    session.state = ConversationState.COMPLETED
+                    llm_response = await self._generate_llm_response(
+                        user_query=user_query,
+                        intent=intent,
+                        context=conversation_context,
+                        language=language
+                    )
+                    return llm_response, []
+                
+                if intent == Intent.HELP:
+                    llm_response = await self._generate_llm_response(
+                        user_query=user_query,
+                        intent=intent,
+                        context=conversation_context,
+                        language=language
+                    )
+                    return llm_response, []
+                
+                if intent == Intent.UNKNOWN or intent == Intent.OUT_OF_SCOPE:
+                    dialogue_state.clarification_count += 1
+                    session.metrics.clarification_count = dialogue_state.clarification_count
+                    
+                    # Generate contextual response using LLM
+                    llm_response = await self._generate_llm_response(
+                        user_query=user_query,
+                        intent=intent,
+                        context=conversation_context,
+                        language=language,
+                        sentiment=nlu_result.sentiment.label.value if nlu_result.sentiment else "neutral"
+                    )
+                    return llm_response, []
+                    
+            except Exception as e:
+                logger.warning("llm_response_generation_failed", error=str(e))
+                # Fall back to template responses
+        
+        # Fallback: Handle special intents with templates
         if intent == Intent.GREETING:
             return self.response_generator.generate_greeting(language), []
         
@@ -429,15 +502,13 @@ class DialogueManager:
         if intent == Intent.HELP:
             return self.response_generator.generate_help(language), []
         
-        if intent == Intent.UNKNOWN:
+        if intent == Intent.UNKNOWN or intent == Intent.OUT_OF_SCOPE:
             dialogue_state.clarification_count += 1
             session.metrics.clarification_count = dialogue_state.clarification_count
             
-            # Check if user is frustrated/upset - respond with empathy
             if nlu_result.sentiment and nlu_result.sentiment.label.value in ['negative', 'frustrated']:
                 return self.response_generator.generate_empathy(language), []
             
-            # If this is the first unclear message, be helpful
             if dialogue_state.clarification_count == 1:
                 return self.response_generator.generate_help(language), []
             
@@ -496,11 +567,12 @@ class DialogueManager:
                 "result": tool_result
             })
             
-            # Generate response based on tool result
+            # Generate response based on tool result using LLM
             response = await self._generate_tool_response(
                 intent_config,
                 tool_result,
-                language
+                language,
+                user_query=user_query
             )
             
             # Mark intent as resolved
@@ -580,15 +652,29 @@ class DialogueManager:
         self,
         intent_config: IntentConfig,
         tool_result: dict,
-        language: Language
+        language: Language,
+        user_query: str = ""
     ) -> str:
-        """Generate response from tool result."""
+        """Generate response from tool result using LLM."""
         if not tool_result.get("success"):
             return self._generate_error_response(language)
         
-        # In production, use Bedrock to generate natural response
-        # For MVP, use templates
+        # Try to use LLM for natural response generation
+        if self._groq_service:
+            try:
+                # Build prompt with tool result data
+                data_context = f"Data: {tool_result}"
+                llm_response = await self._generate_llm_response(
+                    user_query=user_query,
+                    intent=intent_config.intent,
+                    context={"tool_result": tool_result},
+                    language=language
+                )
+                return llm_response
+            except Exception as e:
+                logger.warning("llm_tool_response_failed", error=str(e))
         
+        # Fallback to templates
         templates = {
             Intent.SWAP_HISTORY: {
                 Language.HINGLISH: "Aapke total {count} swaps hue hain. {details}",
@@ -618,6 +704,46 @@ class DialogueManager:
         
         # Fallback
         return f"Done! {tool_result}"
+    
+    def _build_conversation_context(self, session: ConversationSession) -> dict:
+        """Build conversation context for LLM."""
+        # Get last 5 turns for context
+        recent_turns = []
+        for turn in session.turns[-10:]:
+            recent_turns.append({
+                "role": "user" if turn.role == TurnRole.USER else "assistant",
+                "content": turn.content
+            })
+        
+        return {
+            "conversation_history": recent_turns,
+            "driver_name": session.driver.name or "Driver",
+            "current_intent": session.current_intent.value if session.current_intent else None,
+            "filled_slots": session.filled_slots,
+        }
+    
+    async def _generate_llm_response(
+        self,
+        user_query: str,
+        intent: Intent,
+        context: dict,
+        language: Language,
+        sentiment: str = "neutral"
+    ) -> str:
+        """Generate natural response using Groq LLM."""
+        if not self._groq_service:
+            raise RuntimeError("Groq service not available")
+        
+        # Use the Groq service's generate_response method
+        response = await self._groq_service.generate_response(
+            user_query=user_query,
+            intent=intent,
+            entities=[],  # Entities already processed
+            language=language,
+            context=context
+        )
+        
+        return response
     
     def _generate_help_response(self, language: Language) -> str:
         """Generate help menu response."""

@@ -45,31 +45,39 @@ class GroqLLMService:
     
     BASE_URL = "https://api.groq.com/openai/v1"
     
-    SYSTEM_PROMPT = """You are a helpful AI assistant for Battery Smart, India's largest EV battery swapping network.
-You help drivers/riders with their queries in a friendly, conversational manner.
+    SYSTEM_PROMPT = """You are Rahul, a friendly customer support executive at Battery Smart. You're a real person helping drivers with their queries.
 
-Key guidelines:
-1. Respond naturally in Hinglish (Hindi-English mix) or pure Hindi based on user's language
-2. Be concise - drivers are usually in a hurry
-3. Be empathetic when users are frustrated
-4. Always confirm understanding before taking action
-5. If you can't help, acknowledge it and offer to connect with human support
+NEVER say you are an AI, bot, or assistant. You are a human support person named Rahul.
 
-Battery Smart services you can help with:
+YOUR PERSONALITY:
+- Warm, friendly, and genuine - like talking to a helpful friend
+- Use natural speech with fillers like "acha", "hmm", "dekho", "haan", "theek hai"
+- Show real empathy - "arre yaar", "main samajh sakta hoon", "tension mat lo"
+- Be casual but respectful - use "aap" but keep tone friendly
+- Sound like you genuinely care about helping them
+
+LANGUAGE RULES:
+- If user writes in Hindi (Devanagari), respond in Devanagari
+- If user writes in Hinglish (Roman), respond in Hinglish  
+- If user writes in English, respond in English
+- Use natural contractions and casual phrases
+
+CONVERSATION STYLE:
+- Start with warmth: "Haan bhai", "Ji bilkul", "Acha acha"
+- Don't be robotic - vary your responses
+- Use incomplete sentences sometimes like humans do
+- Show you're listening: "hmm", "acha", "samajh gaya"
+- End naturally: "aur kuch?", "theek hai na?", "help ho gayi?"
+
+WHAT YOU CAN HELP WITH:
 - Swap history and invoices
-- Finding nearest stations
-- Checking battery availability
-- Subscription status and renewal
-- Leave/pause requests
+- Finding nearest stations  
+- Battery availability
+- Subscription status/renewal
+- Leave requests
 - DSK activation
 
-Common terms:
-- Swap = Battery exchange at station
-- DSK = Driver Service Kit (new driver activation)
-- Hub/Station = Battery swapping location
-- GST = 18% tax on services
-
-Always be polite, use "aap" (formal you) when addressing drivers."""
+IMPORTANT: Sound human! No formal greetings like "Welcome to Battery Smart". Just talk naturally like a real person would."""
 
     RESPONSE_PROMPT = """Generate a helpful response for this Battery Smart driver query.
 
@@ -225,42 +233,96 @@ Generate a JSON summary:
     
     async def generate_response(
         self,
-        session: ConversationSession,
+        user_query: str,
         intent: Intent,
-        entities: dict[str, Any],
+        entities: list = None,
+        language: Language = Language.HINGLISH,
+        context: dict | None = None,
+        session: ConversationSession | None = None,
         tool_result: dict | None = None
-    ) -> LLMResponse:
+    ) -> str:
         """
         Generate a contextual response using Groq LLM.
         
         Args:
-            session: Current conversation session
+            user_query: The user's current query text
             intent: Detected user intent
-            entities: Extracted entities
+            entities: Extracted entities list
+            language: Target language for response
+            context: Additional context dict (conversation history, tool results, etc.)
+            session: Optional conversation session for full context
             tool_result: Result from tool call if any
         
         Returns:
-            Generated response
+            Generated response text
         """
+        entities = entities or []
+        context = context or {}
+        
         # Build conversation history
-        history = self._build_history(session.turns[-6:])
+        if session:
+            history = self._build_history(session.turns[-6:])
+        elif context.get("conversation_history"):
+            history_parts = []
+            for turn in context["conversation_history"]:
+                role = "Driver" if turn.get("role") == "user" else "Bot"
+                history_parts.append(f"{role}: {turn.get('content', '')}")
+            history = "\n".join(history_parts) if history_parts else "No previous conversation."
+        else:
+            history = "No previous conversation."
         
-        # Determine target language
-        language = "Hinglish" if session.driver.preferred_language == Language.HINGLISH else \
-                   "Hindi" if session.driver.preferred_language == Language.HINDI else "English"
+        # Determine target language string and script
+        # Important: Detect if user wrote in Devanagari vs Roman script
+        user_used_devanagari = any('\u0900' <= c <= '\u097F' for c in user_query)
         
-        # Build prompt
-        prompt = self.RESPONSE_PROMPT.format(
-            history=history,
-            query=session.turns[-1].content if session.turns else "",
-            intent=intent.value,
-            entities=json.dumps(entities, default=str),
-            language=language
-        )
+        if user_used_devanagari or language == Language.HINDI:
+            lang_str = "Hindi using Devanagari script (like नमस्ते, मैं आपकी मदद करता हूं)"
+        elif language == Language.ENGLISH_INDIA:
+            lang_str = "English"
+        else:
+            lang_str = "Hinglish using Roman script (like 'Aapka subscription active hai')"
         
-        # Add tool result context
+        # Get tool result from context if available
+        if not tool_result and context.get("tool_result"):
+            tool_result = context["tool_result"]
+        
+        # Build the prompt based on intent
         if tool_result:
-            prompt += f"\n\nTool result to incorporate: {json.dumps(tool_result, default=str)}"
+            # Response with data
+            prompt = f"""You are Rahul from Battery Smart support. Respond naturally like a real human would.
+
+User said: {user_query}
+Info to share: {json.dumps(tool_result, default=str, ensure_ascii=False)}
+
+Conversation so far:
+{history}
+
+Respond in {lang_str} like a friendly human support person would:
+- Sound natural, not robotic
+- Include the info casually, not like reading from a script
+- Use fillers like "acha", "dekho", "basically" naturally
+- Keep it short and conversational
+- End with something like "aur kuch help chahiye?" or "theek hai?"
+
+Your response (as Rahul):"""
+        else:
+            # General response
+            prompt = f"""You are Rahul from Battery Smart support. Respond naturally like a real human would.
+
+User said: {user_query}
+What they need: {intent.value}
+
+Conversation so far:
+{history}
+
+Respond in {lang_str} like a friendly human support person would:
+- Sound natural and warm, like talking to a friend
+- If they seem frustrated, show genuine empathy first ("arre yaar, main samajh sakta hoon...")
+- If you can't help with something, redirect naturally
+- Use casual phrases and fillers
+- Keep it conversational, not formal
+
+Your response (as Rahul):"""
         
         try:
             result = await self._call_groq(
@@ -283,21 +345,11 @@ Generate a JSON summary:
                 tokens=tokens
             )
             
-            return LLMResponse(
-                text=text.strip(),
-                confidence=0.9,
-                tokens_used=tokens,
-                model=self.model
-            )
+            return text.strip()
             
         except Exception as e:
             logger.error("groq_generation_failed", error=str(e))
-            return LLMResponse(
-                text=self._get_fallback_response(intent, language),
-                confidence=0.5,
-                tokens_used=0,
-                model="fallback"
-            )
+            return self._get_fallback_response(intent, lang_str)
     
     async def classify_intent(
         self,
@@ -560,17 +612,17 @@ Generate a JSON summary:
         return "\n".join(history_parts) if history_parts else "No previous conversation."
     
     def _get_fallback_response(self, intent: Intent, language: str) -> str:
-        """Get fallback response when LLM fails."""
+        """Get fallback response when LLM fails - human-like."""
         fallbacks = {
-            Intent.SWAP_HISTORY: "Main aapki swap history check kar raha hoon. Ek moment please.",
-            Intent.NEAREST_STATION: "Main aapke paas ka station dhundh raha hoon.",
-            Intent.SUBSCRIPTION_STATUS: "Main aapki subscription check kar raha hoon.",
-            Intent.HUMAN_AGENT: "Main aapko human agent se connect kar raha hoon.",
-            Intent.GREETING: "Namaste! Main Battery Smart ka AI assistant hoon. Aaj main aapki kaise help kar sakta hoon?",
-            Intent.HELP: "Main aapki in cheezon mein madad kar sakta hoon: Swap history, Nearest station, Subscription status, Invoice help. Kya chahiye?",
+            Intent.SWAP_HISTORY: "Ek second, swap history dekh raha hoon aapki...",
+            Intent.NEAREST_STATION: "Ruko, dekh raha hoon kaunsa station paas mein hai...",
+            Intent.SUBSCRIPTION_STATUS: "Haan haan, subscription check kar raha hoon, ek minute...",
+            Intent.HUMAN_AGENT: "Theek hai, senior se baat karvata hoon. Ek second.",
+            Intent.GREETING: "Haan ji boliye! Rahul here from Battery Smart. Kaise help karun?",
+            Intent.HELP: "Dekho, main swap history, station, subscription ya invoice mein help kar sakta hoon. Kya chahiye?",
         }
         
-        return fallbacks.get(intent, "Main aapki request process kar raha hoon. Please wait.")
+        return fallbacks.get(intent, "Ek second, dekh raha hoon...")
     
     async def close(self) -> None:
         """Close the HTTP client."""

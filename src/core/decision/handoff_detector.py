@@ -290,15 +290,21 @@ class HandoffDecisionEngine:
                 risk_score=0.75
             )
         
-        # Out of scope
+        # Out of scope - only handoff if CURRENT turn shows frustration
+        # Simple out-of-scope queries (like casual conversation) should be redirected, not handed off
         if signals.out_of_scope_detected:
-            return HandoffDecision(
-                should_handoff=True,
-                trigger=HandoffTrigger.COMPLEX_QUERY,
-                confidence=0.85,
-                reason="Query out of Tier-1 scope",
-                risk_score=0.8
-            )
+            # Only handoff if user is CURRENTLY frustrated (not from past turns)
+            # Check: frustration_detected (current turn) AND low sentiment score (current turn)
+            if signals.frustration_detected and signals.current_sentiment_score < 0.4:
+                return HandoffDecision(
+                    should_handoff=True,
+                    trigger=HandoffTrigger.COMPLEX_QUERY,
+                    confidence=0.85,
+                    reason="Out of scope query with current frustration",
+                    risk_score=0.8
+                )
+            # Otherwise, just log and don't handoff - let the bot redirect conversation
+            logger.debug("out_of_scope_no_handoff", reason="Casual out-of-scope, will redirect")
         
         # No explicit trigger
         return HandoffDecision(
