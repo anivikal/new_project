@@ -4,11 +4,12 @@ Main FastAPI application for Battery Smart Voicebot.
 
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from prometheus_client import Counter, Histogram, generate_latest
 from starlette.responses import Response
 
@@ -190,6 +191,35 @@ def create_app() -> FastAPI:
     # Include routers
     app.include_router(voice_router, prefix="/api/v1")
     app.include_router(handoff_router, prefix="/api/v1")
+    
+    # Serve test UI
+    @app.get("/", response_class=HTMLResponse)
+    async def root():
+        """Redirect to test UI."""
+        return """
+        <html>
+            <head><title>Battery Smart Voicebot</title></head>
+            <body style="font-family: Arial; text-align: center; padding: 50px; background: #1a1a2e; color: white;">
+                <h1>🔋 Battery Smart Voicebot</h1>
+                <p>Welcome to the Multilingual Driver Support Voicebot API</p>
+                <div style="margin: 30px;">
+                    <a href="/test" style="padding: 15px 30px; background: linear-gradient(135deg, #00ff88, #00d4ff); 
+                       color: #1a1a2e; text-decoration: none; border-radius: 10px; font-weight: bold;">
+                       Open Test UI
+                    </a>
+                </div>
+                <p style="color: #888; font-size: 14px;">API Documentation: <a href="/docs" style="color: #00d4ff;">/docs</a></p>
+            </body>
+        </html>
+        """
+    
+    @app.get("/test", response_class=HTMLResponse)
+    async def test_ui():
+        """Serve the test UI HTML file."""
+        test_ui_path = Path(__file__).parent.parent.parent / "test_ui.html"
+        if test_ui_path.exists():
+            return HTMLResponse(content=test_ui_path.read_text(), status_code=200)
+        return HTMLResponse(content="<h1>Test UI not found</h1>", status_code=404)
     
     return app
 
