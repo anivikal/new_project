@@ -455,12 +455,37 @@ class SynthesizerFactory:
     """Factory for creating TTS synthesizer instances."""
     
     @staticmethod
-    def create(provider: str = "polly") -> BaseSynthesizer:
-        """Create a synthesizer instance."""
+    def create(provider: str | None = None) -> BaseSynthesizer:
+        """
+        Create a synthesizer instance.
+        
+        Args:
+            provider: TTS provider - "polly", "gtts", "pyttsx3", "auto"
+                     If None or "auto", uses the configured provider from settings
+        """
+        from src.config import get_settings
+        settings = get_settings()
+        
+        # Use configured provider if not specified
+        if provider is None or provider == "auto":
+            provider = settings.tts.provider
+        
         if provider == "polly":
             return AWSPollySynthesizer()
+        elif provider == "gtts":
+            from src.services.local_tts import get_local_tts
+            return get_local_tts()
+        elif provider == "pyttsx3":
+            from src.services.local_tts.synthesizer import PyttsxSynthesizer
+            return PyttsxSynthesizer()
+        elif provider == "hybrid":
+            from src.services.local_tts.synthesizer import HybridTTSSynthesizer
+            return HybridTTSSynthesizer()
         else:
-            raise ValueError(f"Unknown TTS provider: {provider}")
+            # Default to gtts if unknown
+            logger.warning(f"Unknown TTS provider '{provider}', defaulting to gtts")
+            from src.services.local_tts import get_local_tts
+            return get_local_tts()
 
 
 # Pre-synthesize common responses for lower latency
