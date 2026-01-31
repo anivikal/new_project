@@ -29,7 +29,7 @@ logger = structlog.get_logger(__name__)
 class SummaryGenerator:
     """
     Generates human-readable summaries for agent handoff.
-    Uses LLM for intelligent summarization.
+    Uses Groq LLM for intelligent summarization with fast inference.
     """
     
     SUMMARY_PROMPT = """You are summarizing a customer support conversation for a human agent at Battery Smart (EV battery swapping company).
@@ -66,20 +66,29 @@ Generate a JSON summary with:
 
 Be concise and actionable. Focus on what the agent needs to know to help quickly."""
 
-    def __init__(self) -> None:
+    def __init__(self, use_groq: bool = True) -> None:
         self.settings = get_settings()
-        self._client = None
+        self._groq_service = None
+        self._bedrock_client = None
+        self.use_groq = use_groq
     
-    async def _get_client(self):
-        """Get or create Bedrock client."""
-        if self._client is None:
+    def _get_groq_service(self):
+        """Get Groq service instance."""
+        if self._groq_service is None:
+            from src.services.groq import get_groq_service
+            self._groq_service = get_groq_service()
+        return self._groq_service
+    
+    async def _get_bedrock_client(self):
+        """Get or create Bedrock client (fallback)."""
+        if self._bedrock_client is None:
             import aioboto3
             session = aioboto3.Session()
-            self._client = await session.client(
+            self._bedrock_client = await session.client(
                 "bedrock-runtime",
                 region_name=self.settings.aws.region
             ).__aenter__()
-        return self._client
+        return self._bedrock_client
     
     async def generate_summary(
         self,
@@ -116,72 +125,130 @@ Be concise and actionable. Focus on what the agent needs to know to help quickly
         trigger: HandoffTrigger,
         conversation_text: str
     ) -> HandoffSummary | None:
-        """Generate summary using LLM."""
-        client = await self._get_client()
+        """Generate summary using LLM (Groq preferred, Bedrock fallback)."""
         
-        prompt = self.SUMMARY_PROMPT.format(
-            conversation=conversation_text,
-            phone_last_4=session.driver.phone_number[-4:],
-            city=session.driver.city or "Unknown",
-            language=session.driver.preferred_language.value,
-            total_turns=len(session.turns),
-            avg_confidence=session.metrics.average_confidence,
-            avg_sentiment=session.metrics.average_sentiment,
-            trigger=trigger.value
-        )
+        # Try Groq first (faster and free)
+        if self.use_groq:
+            try:
+                groq = self._get_groq_service()
+                result = await groq.generate_summary(session, trigger.value)
+                
+                if result:
+                    # Build actions taken
+                    actions_taken = self._extract_actions_taken(session)
+                    
+                    # Build suggested actions - handle various response formats
+                    suggested_actions = []
+                    for sa in result.get("suggested_actions", []):
+                        if isinstance(sa, dict):
+                            action = sa.get("action", "unknown")
+                            description = sa.get("description", "")
+                            priority_val = sa.get("priority", 3)
+                            # Ensure priority is an int
+                            try:
+                                priority = int(priority_val) if priority_val else 3
+                            except (ValueError, TypeError):
+                                priority = 3
+                            suggested_actions.append(SuggestedAction(
+                                action=str(action),
+                                description=str(description),
+                                priority=priority
+                            ))
+                        elif isinstance(sa, str):
+                            suggested_actions.append(SuggestedAction(
+                                action=sa,
+                                description="",
+                                priority=3
+                            ))
+                    
+                    # Build key excerpts
+                    key_moments = result.get("key_moments", [])
+                    excerpts = self._extract_key_excerpts(session.turns, key_moments)
+                    
+                    return HandoffSummary(
+                        one_line_summary=result.get("one_line_summary", "Driver needs assistance"),
+                        detailed_summary=result.get("primary_issue", ""),
+                        primary_issue=result.get("primary_issue", "general_query"),
+                        secondary_issues=result.get("actions_taken", []),
+                        stuck_on=None,
+                        topics_discussed=self._extract_topics(session),
+                        actions_taken=actions_taken,
+                        suggested_actions=suggested_actions,
+                        key_excerpts=excerpts
+                    )
+            except Exception as e:
+                logger.warning("groq_summary_failed_trying_bedrock", error=str(e))
         
-        response = await client.invoke_model(
-            modelId=self.settings.aws.bedrock_model_id,
-            contentType="application/json",
-            accept="application/json",
-            body=json.dumps({
-                "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 1000,
-                "temperature": 0.3,
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ]
-            })
-        )
-        
-        response_body = json.loads(response["body"].read())
-        result_text = response_body["content"][0]["text"]
-        
-        # Parse JSON from response
-        json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
-        if not json_match:
-            return None
-        
-        result = json.loads(json_match.group())
-        
-        # Build actions taken
-        actions_taken = self._extract_actions_taken(session)
-        
-        # Build suggested actions
-        suggested_actions = [
-            SuggestedAction(
-                action=sa["action"],
-                description=sa["description"],
-                priority=sa.get("priority", 3)
+        # Fallback to Bedrock
+        try:
+            client = await self._get_bedrock_client()
+            
+            prompt = self.SUMMARY_PROMPT.format(
+                conversation=conversation_text,
+                phone_last_4=session.driver.phone_number[-4:] if session.driver.phone_number else "XXXX",
+                city=session.driver.city or "Unknown",
+                language=session.driver.preferred_language.value,
+                total_turns=len(session.turns),
+                avg_confidence=session.metrics.average_confidence,
+                avg_sentiment=session.metrics.average_sentiment,
+                trigger=trigger.value
             )
-            for sa in result.get("suggested_actions", [])
-        ]
-        
-        # Build key excerpts
-        key_moments = result.get("key_moments", [])
-        excerpts = self._extract_key_excerpts(session.turns, key_moments)
-        
-        return HandoffSummary(
-            one_line_summary=result.get("one_line_summary", "Driver needs assistance"),
-            detailed_summary=result.get("detailed_summary", ""),
-            primary_issue=result.get("primary_issue", "general_query"),
-            secondary_issues=result.get("secondary_issues", []),
-            stuck_on=result.get("stuck_on"),
-            topics_discussed=self._extract_topics(session),
-            actions_taken=actions_taken,
-            suggested_actions=suggested_actions,
-            key_excerpts=excerpts
-        )
+            
+            response = await client.invoke_model(
+                modelId=self.settings.aws.bedrock_model_id,
+                contentType="application/json",
+                accept="application/json",
+                body=json.dumps({
+                    "anthropic_version": "bedrock-2023-05-31",
+                    "max_tokens": 1000,
+                    "temperature": 0.3,
+                    "messages": [
+                        {"role": "user", "content": prompt}
+                    ]
+                })
+            )
+            
+            response_body = json.loads(response["body"].read())
+            result_text = response_body["content"][0]["text"]
+            
+            # Parse JSON from response
+            json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
+            if not json_match:
+                return None
+            
+            result = json.loads(json_match.group())
+            
+            # Build actions taken
+            actions_taken = self._extract_actions_taken(session)
+            
+            # Build suggested actions
+            suggested_actions = [
+                SuggestedAction(
+                    action=sa["action"],
+                    description=sa["description"],
+                    priority=sa.get("priority", 3)
+                )
+                for sa in result.get("suggested_actions", [])
+            ]
+            
+            # Build key excerpts
+            key_moments = result.get("key_moments", [])
+            excerpts = self._extract_key_excerpts(session.turns, key_moments)
+            
+            return HandoffSummary(
+                one_line_summary=result.get("one_line_summary", "Driver needs assistance"),
+                detailed_summary=result.get("detailed_summary", ""),
+                primary_issue=result.get("primary_issue", "general_query"),
+                secondary_issues=result.get("secondary_issues", []),
+                stuck_on=result.get("stuck_on"),
+                topics_discussed=self._extract_topics(session),
+                actions_taken=actions_taken,
+                suggested_actions=suggested_actions,
+                key_excerpts=excerpts
+            )
+        except Exception as e:
+            logger.error("bedrock_summary_also_failed", error=str(e))
+            return None
     
     def _generate_rule_based_summary(
         self,

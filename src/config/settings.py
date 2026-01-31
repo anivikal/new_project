@@ -166,6 +166,58 @@ class CRMSettings(BaseSettings):
     timeout_seconds: int = Field(default=10, description="API timeout")
 
 
+class GroqSettings(BaseSettings):
+    """Groq LLM API settings."""
+    
+    model_config = SettingsConfigDict(env_prefix="GROQ_")
+    
+    api_key: str = Field(
+        default="",
+        description="Groq API key for LLM inference"
+    )
+    model_id: str = Field(
+        default="llama-3.3-70b-versatile",
+        description="Groq model to use"
+    )
+    timeout_seconds: int = Field(default=30, description="API timeout")
+    max_tokens: int = Field(default=500, description="Max tokens for response")
+
+
+class IndicASRSettings(BaseSettings):
+    """AI4Bharat IndicConformer ASR settings."""
+    
+    model_config = SettingsConfigDict(env_prefix="INDIC_ASR_")
+    
+    hf_token: str = Field(
+        default="",
+        description="HuggingFace token for model access"
+    )
+    model_id: str = Field(
+        default="ai4bharat/indic-conformer-600m-multilingual",
+        description="IndicConformer model ID"
+    )
+    decoding_method: str = Field(
+        default="ctc",
+        description="Decoding method: ctc or rnnt"
+    )
+    device: str = Field(
+        default="cpu",
+        description="Device to run model on: cpu or cuda"
+    )
+
+
+class TTSSettings(BaseSettings):
+    """TTS provider settings."""
+    
+    model_config = SettingsConfigDict(env_prefix="TTS_")
+    
+    provider: str = Field(
+        default="gtts",
+        description="TTS provider: gtts, pyttsx3, polly"
+    )
+    cache_size: int = Field(default=500, description="TTS cache size")
+
+
 class Settings(BaseSettings):
     """Main application settings aggregating all sub-settings."""
     
@@ -189,6 +241,9 @@ class Settings(BaseSettings):
     voicebot: VoicebotSettings = Field(default_factory=VoicebotSettings)
     api: APISettings = Field(default_factory=APISettings)
     crm: CRMSettings = Field(default_factory=CRMSettings)
+    groq: GroqSettings = Field(default_factory=GroqSettings)
+    indic_asr: IndicASRSettings = Field(default_factory=IndicASRSettings)
+    tts: TTSSettings = Field(default_factory=TTSSettings)
 
 
 @lru_cache

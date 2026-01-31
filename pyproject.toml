@@ -51,6 +51,11 @@ dependencies = [
     "cachetools>=5.3.0",
     "langdetect>=1.0.9",
     "indic-transliteration>=2.3.0",
+    # Groq LLM integration
+    "groq>=0.4.0",
+    # Local TTS (Google TTS)
+    "gTTS>=2.5.0",
+    "pyttsx3>=2.90",
 ]
 
 [project.optional-dependencies]
@@ -67,9 +72,13 @@ dev = [
 ]
 ml = [
     "torch>=2.1.0",
+    "torchaudio>=2.1.0",
     "transformers>=4.36.0",
     "sentencepiece>=0.1.99",
     "faster-whisper>=0.10.0",
+    # ONNX for optimized inference
+    "onnx>=1.15.0",
+    "onnxruntime>=1.16.0",
 ]
 
 [project.scripts]

@@ -173,6 +173,32 @@ class RuleSentimentAnalyzer(BaseSentimentAnalyzer):
         )
 
 
+class GroqSentimentAnalyzer(BaseSentimentAnalyzer):
+    """Groq-based sentiment analysis for nuanced understanding with fast inference."""
+    
+    def __init__(self) -> None:
+        self.settings = get_settings()
+        self._groq_service = None
+    
+    def _get_groq_service(self):
+        """Get Groq service instance."""
+        if self._groq_service is None:
+            from src.services.groq import get_groq_service
+            self._groq_service = get_groq_service()
+        return self._groq_service
+    
+    async def analyze(self, text: str, language: Language, context: list[str] | None = None) -> Sentiment:
+        """Analyze sentiment using Groq LLM."""
+        try:
+            groq = self._get_groq_service()
+            return await groq.analyze_sentiment(text, language, context)
+        except Exception as e:
+            logger.error("groq_sentiment_analysis_failed", error=str(e))
+            # Fall back to rule-based
+            fallback = RuleSentimentAnalyzer()
+            return await fallback.analyze(text, language, context)
+
+
 class BedrockSentimentAnalyzer(BaseSentimentAnalyzer):
     """AWS Bedrock-based sentiment analysis for nuanced understanding."""
     
@@ -288,12 +314,13 @@ Respond in JSON:
 class HybridSentimentAnalyzer(BaseSentimentAnalyzer):
     """
     Combines rule-based and LLM sentiment analysis.
-    Rules for speed, LLM for nuanced cases.
+    Rules for speed, Groq LLM for nuanced cases.
     """
     
-    def __init__(self) -> None:
+    def __init__(self, use_groq: bool = True) -> None:
         self.rule_analyzer = RuleSentimentAnalyzer()
-        self.llm_analyzer = BedrockSentimentAnalyzer()
+        # Use Groq by default (free and fast), fallback to Bedrock if needed
+        self.llm_analyzer = GroqSentimentAnalyzer() if use_groq else BedrockSentimentAnalyzer()
         self.settings = get_settings()
     
     async def analyze(self, text: str, language: Language, context: list[str] | None = None) -> Sentiment:
@@ -336,6 +363,7 @@ class SentimentAnalyzerFactory:
         """Create a sentiment analyzer."""
         analyzers = {
             "rule": RuleSentimentAnalyzer,
+            "groq": GroqSentimentAnalyzer,
             "bedrock": BedrockSentimentAnalyzer,
             "hybrid": HybridSentimentAnalyzer,
         }

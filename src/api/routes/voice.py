@@ -170,12 +170,13 @@ async def start_call(request: StartCallRequest):
     # Generate greeting
     greeting_text = dialogue_manager.response_generator.generate_greeting(language)
     
-    # Synthesize greeting audio
+    # Synthesize greeting audio (uses configured TTS provider)
     greeting_audio_base64 = None
     try:
-        synthesizer = SynthesizerFactory.create("polly")
+        synthesizer = SynthesizerFactory.create()  # Uses auto/configured provider
         result = await synthesizer.synthesize(greeting_text, language)
-        greeting_audio_base64 = base64.b64encode(result.audio_data).decode()
+        if result.audio_data:
+            greeting_audio_base64 = base64.b64encode(result.audio_data).decode()
     except Exception as e:
         logger.warning("greeting_synthesis_failed", error=str(e))
     
@@ -213,15 +214,16 @@ async def process_text_message(request: TextInputRequest):
         user_text=request.text
     )
     
-    # Synthesize response audio
+    # Synthesize response audio (uses configured TTS provider)
     response_audio_base64 = None
     try:
-        synthesizer = SynthesizerFactory.create("polly")
+        synthesizer = SynthesizerFactory.create()  # Uses auto/configured provider
         result = await synthesizer.synthesize(
             response_text,
             session.driver.preferred_language
         )
-        response_audio_base64 = base64.b64encode(result.audio_data).decode()
+        if result.audio_data:
+            response_audio_base64 = base64.b64encode(result.audio_data).decode()
     except Exception as e:
         logger.warning("response_synthesis_failed", error=str(e))
     
@@ -325,7 +327,7 @@ async def voice_stream(websocket: WebSocket, call_id: str):
     
     # Initialize components
     transcriber = TranscriberFactory.create("whisper")  # or "aws" for AWS Transcribe
-    synthesizer = SynthesizerFactory.create("polly")
+    synthesizer = SynthesizerFactory.create()  # Uses auto/configured provider
     vad = VADProcessor(aggressiveness=settings.voicebot.vad_aggressiveness)
     
     # Audio buffer for streaming transcription
