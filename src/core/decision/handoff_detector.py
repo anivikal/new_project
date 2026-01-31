@@ -252,13 +252,21 @@ class HandoffDecisionEngine:
                 risk_score=0.9
             )
         
-        # Frustrated user
-        if signals.frustration_detected and signals.current_sentiment_score < self.policy.frustration_threshold:
+        # Frustrated user - require multiple negative signals before handoff
+        # Only trigger on first message if VERY frustrated (score < 0.15) or after multiple negative turns
+        frustration_severe = signals.frustration_detected and signals.current_sentiment_score < 0.15
+        frustration_persistent = (
+            signals.frustration_detected and 
+            signals.negative_sentiment_count >= 2 and
+            signals.current_sentiment_score < self.policy.frustration_threshold
+        )
+        
+        if frustration_severe or frustration_persistent:
             return HandoffDecision(
                 should_handoff=True,
                 trigger=HandoffTrigger.NEGATIVE_SENTIMENT,
                 confidence=0.9,
-                reason="User frustration detected",
+                reason="User frustration detected" if frustration_severe else "Persistent user frustration",
                 risk_score=0.85
             )
         

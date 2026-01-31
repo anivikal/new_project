@@ -223,6 +223,48 @@ class PatternEntityExtractor(BaseEntityExtractor):
         return entities
 
 
+class GroqEntityExtractor(BaseEntityExtractor):
+    """Groq-based entity extraction for complex cases with fast inference."""
+    
+    def __init__(self) -> None:
+        self.settings = get_settings()
+        self._groq_service = None
+    
+    def _get_groq_service(self):
+        """Get Groq service instance."""
+        if self._groq_service is None:
+            from src.services.groq import get_groq_service
+            self._groq_service = get_groq_service()
+        return self._groq_service
+    
+    async def extract(self, text: str, language: Language) -> list[Entity]:
+        """Extract entities using Groq LLM."""
+        try:
+            groq = self._get_groq_service()
+            raw_entities = await groq.extract_entities(text, language)
+            
+            entities = []
+            for ent in raw_entities:
+                try:
+                    entity_type = EntityType(ent.get("type", "unknown"))
+                    entities.append(Entity(
+                        type=entity_type,
+                        value=str(ent.get("value", "")),
+                        confidence=float(ent.get("confidence", 0.8)),
+                        normalized_value=ent.get("normalized_value")
+                    ))
+                except (ValueError, KeyError):
+                    continue
+            
+            return entities
+            
+        except Exception as e:
+            logger.error("groq_entity_extraction_failed", error=str(e))
+            # Fall back to pattern extraction
+            fallback = PatternEntityExtractor()
+            return await fallback.extract(text, language)
+
+
 class BedrockEntityExtractor(BaseEntityExtractor):
     """AWS Bedrock-based entity extraction for complex cases."""
     
@@ -325,13 +367,14 @@ Respond in JSON:
 
 class HybridEntityExtractor(BaseEntityExtractor):
     """
-    Combines pattern and LLM extraction for best results.
+    Combines pattern and Groq LLM extraction for best results.
     Patterns for structured data, LLM for complex/ambiguous cases.
     """
     
-    def __init__(self) -> None:
+    def __init__(self, use_groq: bool = True) -> None:
         self.pattern_extractor = PatternEntityExtractor()
-        self.llm_extractor = BedrockEntityExtractor()
+        # Use Groq by default (free and fast), fallback to Bedrock if needed
+        self.llm_extractor = GroqEntityExtractor() if use_groq else BedrockEntityExtractor()
     
     async def extract(self, text: str, language: Language) -> list[Entity]:
         """Extract entities using hybrid approach."""
@@ -367,6 +410,7 @@ class EntityExtractorFactory:
         """Create an entity extractor."""
         extractors = {
             "pattern": PatternEntityExtractor,
+            "groq": GroqEntityExtractor,
             "bedrock": BedrockEntityExtractor,
             "hybrid": HybridEntityExtractor,
         }

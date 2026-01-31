@@ -490,13 +490,19 @@ Be concise and actionable. Focus on what the agent needs to know to help quickly
     def _extract_key_excerpts(
         self,
         turns: list[ConversationTurn],
-        indices: list[int]
+        indices: list
     ) -> list[ConversationExcerpt]:
         """Extract key conversation excerpts."""
         excerpts = []
         
-        for i in indices:
-            if i < len(turns):
+        for idx in indices:
+            # Handle string indices from LLM responses
+            try:
+                i = int(idx) if isinstance(idx, str) else idx
+            except (ValueError, TypeError):
+                continue
+            
+            if isinstance(i, int) and 0 <= i < len(turns):
                 turn = turns[i]
                 annotation = None
                 
