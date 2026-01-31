@@ -176,7 +176,7 @@ class GroqSettings(BaseSettings):
         description="Groq API key for LLM inference"
     )
     model_id: str = Field(
-        default="llama-3.1-70b-versatile",
+        default="llama-3.3-70b-versatile",
         description="Groq model to use"
     )
     timeout_seconds: int = Field(default=30, description="API timeout")
