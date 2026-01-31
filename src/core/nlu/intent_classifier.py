@@ -192,6 +192,35 @@ class PatternIntentClassifier(BaseIntentClassifier):
         )
 
 
+class GroqIntentClassifier(BaseIntentClassifier):
+    """
+    Groq-based intent classifier using fast LLM inference.
+    Provides robust Hinglish understanding with low latency.
+    """
+    
+    def __init__(self) -> None:
+        self.settings = get_settings()
+        self._groq_service = None
+    
+    def _get_groq_service(self):
+        """Get Groq service instance."""
+        if self._groq_service is None:
+            from src.services.groq import get_groq_service
+            self._groq_service = get_groq_service()
+        return self._groq_service
+    
+    async def classify(self, text: str, language: Language, context: dict | None = None) -> IntentClassification:
+        """Classify intent using Groq LLM."""
+        try:
+            groq = self._get_groq_service()
+            return await groq.classify_intent(text, language, context)
+        except Exception as e:
+            logger.error("groq_classification_failed", error=str(e))
+            # Fall back to pattern classifier
+            fallback = PatternIntentClassifier()
+            return await fallback.classify(text, language, context)
+
+
 class BedrockIntentClassifier(BaseIntentClassifier):
     """
     AWS Bedrock-based intent classifier using Claude.
@@ -325,12 +354,13 @@ Respond in JSON format:
 class HybridIntentClassifier(BaseIntentClassifier):
     """
     Hybrid classifier combining pattern matching and LLM.
-    Uses patterns for high-confidence matches, LLM for ambiguous cases.
+    Uses patterns for high-confidence matches, Groq LLM for ambiguous cases.
     """
     
-    def __init__(self) -> None:
+    def __init__(self, use_groq: bool = True) -> None:
         self.pattern_classifier = PatternIntentClassifier()
-        self.llm_classifier = BedrockIntentClassifier()
+        # Use Groq by default (free and fast), fallback to Bedrock if needed
+        self.llm_classifier = GroqIntentClassifier() if use_groq else BedrockIntentClassifier()
         self.settings = get_settings()
     
     async def classify(self, text: str, language: Language, context: dict | None = None) -> IntentClassification:
@@ -371,6 +401,7 @@ class IntentClassifierFactory:
         """Create an intent classifier."""
         classifiers = {
             "pattern": PatternIntentClassifier,
+            "groq": GroqIntentClassifier,
             "bedrock": BedrockIntentClassifier,
             "hybrid": HybridIntentClassifier,
         }
