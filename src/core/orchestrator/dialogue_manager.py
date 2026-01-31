@@ -190,43 +190,44 @@ class DialogueState:
 
 
 class ResponseGenerator:
-    """Generates natural responses in Hindi/Hinglish."""
+    """Generates natural human-like responses."""
     
+    # Human-like greetings (as Rahul from support)
     GREETING_RESPONSES = {
-        Language.HINDI: "नमस्ते! मैं Battery Smart का AI assistant हूँ। आज मैं आपकी कैसे मदद कर सकता हूँ?",
-        Language.HINGLISH: "Namaste! Main Battery Smart ka AI assistant hoon. Aaj main aapki kaise help kar sakta hoon?",
-        Language.ENGLISH_INDIA: "Hello! I'm Battery Smart's AI assistant. How can I help you today?",
+        Language.HINDI: "हाँ जी, बोलिए! मैं राहुल बोल रहा हूँ Battery Smart से। कैसे मदद करूँ आपकी?",
+        Language.HINGLISH: "Haan ji boliye! Rahul here from Battery Smart. Kaise help kar sakta hoon aapki?",
+        Language.ENGLISH_INDIA: "Hey! Rahul here from Battery Smart. How can I help you today?",
     }
     
     CLARIFICATION_RESPONSES = {
-        Language.HINDI: "जी, मैं सुन रहा हूँ। आप बताइए - swap history, nearest station, ya subscription के बारे में पूछना है?",
-        Language.HINGLISH: "Ji, main sun raha hoon. Aap bataiye - swap history, nearest station, ya subscription ke baare mein poochna hai?",
-        Language.ENGLISH_INDIA: "Yes, I'm listening. Please tell me - do you want to ask about swap history, nearest station, or subscription?",
+        Language.HINDI: "अच्छा अच्छा, बताइए क्या चाहिए - swap history, station ढूंढना है, या subscription का कुछ?",
+        Language.HINGLISH: "Acha acha, bataiye kya chahiye - swap history, station dhundhna hai, ya subscription ka kuch?",
+        Language.ENGLISH_INDIA: "Sure sure, tell me what you need - swap history, finding a station, or something about subscription?",
     }
     
-    # Empathetic responses for when user seems frustrated
+    # Empathetic responses - sound genuinely concerned
     EMPATHY_RESPONSES = {
-        Language.HINDI: "मैं समझ सकता हूँ। मैं आपकी मदद करने के लिए यहाँ हूँ। बताइए क्या परेशानी है?",
-        Language.HINGLISH: "Main samajh sakta hoon. Main aapki madad karne ke liye yahan hoon. Bataiye kya pareshani hai?",
-        Language.ENGLISH_INDIA: "I understand. I'm here to help you. Please tell me what's the issue?",
+        Language.HINDI: "अरे यार, मैं समझ सकता हूँ। परेशान मत होइए, बताइए क्या हुआ - मैं देखता हूँ।",
+        Language.HINGLISH: "Arre yaar, main samajh sakta hoon. Tension mat lo, bataiye kya hua - main dekhta hoon.",
+        Language.ENGLISH_INDIA: "Hey, I totally understand. Don't worry, tell me what happened - let me look into it.",
     }
     
     HELP_RESPONSES = {
-        Language.HINDI: "मैं आपकी इन चीज़ों में मदद कर सकता हूँ: 1) Swap history 2) Nearest station 3) Subscription status 4) Invoice help। क्या चाहिए?",
-        Language.HINGLISH: "Main aapki in cheezon mein madad kar sakta hoon: 1) Swap history 2) Nearest station 3) Subscription status 4) Invoice help. Kya chahiye?",
-        Language.ENGLISH_INDIA: "I can help you with: 1) Swap history 2) Nearest station 3) Subscription status 4) Invoice help. What do you need?",
+        Language.HINDI: "देखो, मैं ये सब कर सकता हूँ - swap history, nearest station, subscription check, invoice explain. क्या चाहिए?",
+        Language.HINGLISH: "Dekho, main ye sab kar sakta hoon - swap history, nearest station, subscription check, invoice explain. Kya chahiye?",
+        Language.ENGLISH_INDIA: "Look, I can help with swap history, nearest station, subscription stuff, or invoice queries. What do you need?",
     }
     
     HANDOFF_RESPONSES = {
-        Language.HINDI: "मैं आपको हमारे customer care executive से connect कर रहा हूँ। कृपया थोड़ा इंतज़ार करें।",
-        Language.HINGLISH: "Main aapko humare customer care executive se connect kar raha hoon. Please thoda wait karein.",
-        Language.ENGLISH_INDIA: "I'm connecting you with our customer care executive. Please wait a moment.",
+        Language.HINDI: "अच्छा ठीक है, मैं आपको सीनियर से बात करवाता हूँ। एक मिनट रुकिए।",
+        Language.HINGLISH: "Acha theek hai, main aapko senior se baat karvata hoon. Ek minute rukiye.",
+        Language.ENGLISH_INDIA: "Okay, let me connect you with a senior executive. Just a moment.",
     }
     
     GOODBYE_RESPONSES = {
-        Language.HINDI: "धन्यवाद! Battery Smart को choose करने के लिए। अगर कोई और help चाहिए तो ज़रूर बताइए।",
-        Language.HINGLISH: "Thank you! Battery Smart choose karne ke liye. Agar koi aur help chahiye toh zaroor bataiye.",
-        Language.ENGLISH_INDIA: "Thank you for choosing Battery Smart! Let us know if you need any other help.",
+        Language.HINDI: "ठीक है भाई, कोई और help चाहिए तो बताना। Take care!",
+        Language.HINGLISH: "Theek hai bhai, koi aur help chahiye toh batana. Take care!",
+        Language.ENGLISH_INDIA: "Alright, let me know if you need anything else. Take care!",
     }
     
     def generate_greeting(self, language: Language) -> str:
