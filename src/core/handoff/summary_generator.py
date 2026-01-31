@@ -137,15 +137,29 @@ Be concise and actionable. Focus on what the agent needs to know to help quickly
                     # Build actions taken
                     actions_taken = self._extract_actions_taken(session)
                     
-                    # Build suggested actions
-                    suggested_actions = [
-                        SuggestedAction(
-                            action=sa.get("action", sa) if isinstance(sa, dict) else sa,
-                            description=sa.get("description", "") if isinstance(sa, dict) else "",
-                            priority=sa.get("priority", 3) if isinstance(sa, dict) else 3
-                        )
-                        for sa in result.get("suggested_actions", [])
-                    ]
+                    # Build suggested actions - handle various response formats
+                    suggested_actions = []
+                    for sa in result.get("suggested_actions", []):
+                        if isinstance(sa, dict):
+                            action = sa.get("action", "unknown")
+                            description = sa.get("description", "")
+                            priority_val = sa.get("priority", 3)
+                            # Ensure priority is an int
+                            try:
+                                priority = int(priority_val) if priority_val else 3
+                            except (ValueError, TypeError):
+                                priority = 3
+                            suggested_actions.append(SuggestedAction(
+                                action=str(action),
+                                description=str(description),
+                                priority=priority
+                            ))
+                        elif isinstance(sa, str):
+                            suggested_actions.append(SuggestedAction(
+                                action=sa,
+                                description="",
+                                priority=3
+                            ))
                     
                     # Build key excerpts
                     key_moments = result.get("key_moments", [])
