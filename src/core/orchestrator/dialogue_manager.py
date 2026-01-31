@@ -192,9 +192,22 @@ class ResponseGenerator:
     }
     
     CLARIFICATION_RESPONSES = {
-        Language.HINDI: "माफ़ कीजिए, मैं समझ नहीं पाया। क्या आप दोबारा बता सकते हैं?",
-        Language.HINGLISH: "Sorry, main samajh nahi paya. Kya aap dobara bata sakte hain?",
-        Language.ENGLISH_INDIA: "Sorry, I didn't understand. Could you please repeat?",
+        Language.HINDI: "जी, मैं सुन रहा हूँ। आप बताइए - swap history, nearest station, ya subscription के बारे में पूछना है?",
+        Language.HINGLISH: "Ji, main sun raha hoon. Aap bataiye - swap history, nearest station, ya subscription ke baare mein poochna hai?",
+        Language.ENGLISH_INDIA: "Yes, I'm listening. Please tell me - do you want to ask about swap history, nearest station, or subscription?",
+    }
+    
+    # Empathetic responses for when user seems frustrated
+    EMPATHY_RESPONSES = {
+        Language.HINDI: "मैं समझ सकता हूँ। मैं आपकी मदद करने के लिए यहाँ हूँ। बताइए क्या परेशानी है?",
+        Language.HINGLISH: "Main samajh sakta hoon. Main aapki madad karne ke liye yahan hoon. Bataiye kya pareshani hai?",
+        Language.ENGLISH_INDIA: "I understand. I'm here to help you. Please tell me what's the issue?",
+    }
+    
+    HELP_RESPONSES = {
+        Language.HINDI: "मैं आपकी इन चीज़ों में मदद कर सकता हूँ: 1) Swap history 2) Nearest station 3) Subscription status 4) Invoice help। क्या चाहिए?",
+        Language.HINGLISH: "Main aapki in cheezon mein madad kar sakta hoon: 1) Swap history 2) Nearest station 3) Subscription status 4) Invoice help. Kya chahiye?",
+        Language.ENGLISH_INDIA: "I can help you with: 1) Swap history 2) Nearest station 3) Subscription status 4) Invoice help. What do you need?",
     }
     
     HANDOFF_RESPONSES = {
@@ -219,6 +232,14 @@ class ResponseGenerator:
         if context:
             base += f" {context}"
         return base
+    
+    def generate_empathy(self, language: Language) -> str:
+        """Generate empathetic response for frustrated users."""
+        return self.EMPATHY_RESPONSES.get(language, self.EMPATHY_RESPONSES[Language.HINGLISH])
+    
+    def generate_help(self, language: Language) -> str:
+        """Generate help/menu response."""
+        return self.HELP_RESPONSES.get(language, self.HELP_RESPONSES[Language.HINGLISH])
     
     def generate_handoff_message(self, language: Language) -> str:
         """Generate handoff transition message."""
@@ -406,11 +427,20 @@ class DialogueManager:
             return self.response_generator.generate_goodbye(language), []
         
         if intent == Intent.HELP:
-            return self._generate_help_response(language), []
+            return self.response_generator.generate_help(language), []
         
         if intent == Intent.UNKNOWN:
             dialogue_state.clarification_count += 1
             session.metrics.clarification_count = dialogue_state.clarification_count
+            
+            # Check if user is frustrated/upset - respond with empathy
+            if nlu_result.sentiment and nlu_result.sentiment.label.value in ['negative', 'frustrated']:
+                return self.response_generator.generate_empathy(language), []
+            
+            # If this is the first unclear message, be helpful
+            if dialogue_state.clarification_count == 1:
+                return self.response_generator.generate_help(language), []
+            
             return self.response_generator.generate_clarification(language), []
         
         # Get intent configuration
